@@ -6,7 +6,7 @@ import MetricCards from './components/MetricCards';
 import ResultCharts from './components/ResultCharts';
 
 export default function App() {
-  const [apiUrl] = useState(process.env.REACT_APP_API_URL || 'http://localhost:8000');
+  const [apiUrl] = useState(import.meta.env.VITE_API_URL || 'http://localhost:8000');
   const [trainingStatus, setTrainingStatus] = useState('idle');
   const [results, setResults] = useState(null);
   const [trainConfig, setTrainConfig] = useState({

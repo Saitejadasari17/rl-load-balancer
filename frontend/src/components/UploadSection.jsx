@@ -15,7 +15,7 @@ export default function UploadSection() {
     formData.append('file', selectedFile);
 
     try {
-      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
       const res = await fetch(`${apiUrl}/upload-dataset`, {
         method: 'POST',
         body: formData
@@ -54,7 +54,7 @@ export default function UploadSection() {
       </div>
 
       {uploadResult && (
-        <div className="mt-4 p-3 bg-green-900/20 border border-green-700 rounded flex items-gap-2">
+        <div className="mt-4 p-3 bg-green-900/20 border border-green-700 rounded flex items-center gap-2">
           <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0 mr-2" />
           <div className="text-sm">
             <p className="font-semibold text-green-300">{uploadResult.filename}</p>
