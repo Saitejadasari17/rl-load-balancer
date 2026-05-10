@@ -1,0 +1,33 @@
+{
+  "status": "completed",
+  "baselines": {
+    "Round Robin": {
+      "avg_latency": 185.7039060526934,
+      "avg_utilization": 0.925205647945404,
+      "std_latency": 8.458214556158211
+    },
+    "Least Connections": {
+      "avg_latency": 171.19608737716987,
+      "avg_utilization": 0.9188413619995117,
+      "std_latency": 0.7955685973056603
+    },
+    "Random": {
+      "avg_latency": 209.61810245540624,
+      "avg_utilization": 0.8991677165031433,
+      "std_latency": 15.600603624963085
+    },
+    "Weighted RR": {
+      "avg_latency": 511.745271023339,
+      "avg_utilization": 0.6354384422302246,
+      "std_latency": 11.947565942275588
+    }
+  },
+  "rl_agent": {
+    "avg_latency": 175.8667361385431,
+    "avg_utilization": 0.9189621210098267,
+    "fairness_index": 0.9993577446902222
+  },
+  "best_baseline_ms": 171.19608737716987,
+  "rl_agent_ms": 175.8667361385431,
+  "improvement": -2.7282450393174646
+}

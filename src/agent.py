@@ -1,119 +1,476 @@
+"""
+Deep Q-Network (DQN) Agent for Adaptive Load Balancing
+Built from scratch using only NumPy — no PyTorch, no TensorFlow.
+
+This demonstrates understanding of:
+- Forward propagation through a neural network
+- Backpropagation and gradient descent
+- Experience replay buffer
+- Target network for training stability
+- Epsilon-greedy exploration strategy
+
+Architecture: 9 → 128 → 128 → 3
+  Input:  [cpu1, queue1, lat1, cpu2, queue2, lat2, cpu3, queue3, lat3]
+  Output: [Q(s, Server1), Q(s, Server2), Q(s, Server3)]
+"""
+
 import os
 import numpy as np
-from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.results_plotter import plot_results
-import matplotlib.pyplot as plt
+import json
 
 try:
     from .environment import LoadBalancerEnv
 except ImportError:
-    # For direct execution
     import sys
-    import os
     sys.path.append(os.path.dirname(os.path.dirname(__file__)))
     from environment import LoadBalancerEnv
 
-class RewardCallback(BaseCallback):
-    """Callback to track rewards during training."""
-    def __init__(self, verbose=0):
-        super().__init__(verbose)
-        self.rewards = []
 
-    def _on_step(self) -> bool:
-        # Log reward at the end of each episode
-        if len(self.model.ep_info_buffer) > 0:
-            episode_reward = self.model.ep_info_buffer[-1]['r']
-            self.rewards.append(episode_reward)
-        return True
+# ──────────────────────────────────────────────
+#  Neural Network (NumPy only)
+# ──────────────────────────────────────────────
 
-def train_rl_agent(env, total_timesteps=100000, model_path="models/rl_load_balancer"):
-    """Train the RL agent using PPO."""
-    # Create monitored environment
-    env = Monitor(env, filename="logs/")
+class NeuralNetwork:
+    """
+    Fully-connected neural network using only NumPy.
+    Architecture: input_size → hidden1 → hidden2 → output_size
+    Activation: ReLU (hidden), Linear (output)
+    """
 
-    # Create PPO model
-    model = PPO(
-        "MlpPolicy",
-        env,
-        learning_rate=3e-4,
-        n_steps=2048,
-        batch_size=64,
-        n_epochs=10,
-        gamma=0.99,
-        gae_lambda=0.95,
-        clip_range=0.2,
-        clip_range_vf=None,
-        normalize_advantage=True,
-        ent_coef=0.0,
-        vf_coef=0.5,
-        max_grad_norm=0.5,
-        use_sde=False,
-        sde_sample_freq=-1,
-        target_kl=None,
-        tensorboard_log=None,
-        policy_kwargs=None,
-        verbose=0,
-        seed=None,
-        device="auto",
-        _init_setup_model=True,
+    def __init__(self, input_size, hidden_size, output_size, lr=0.001):
+        self.lr = lr
+
+        # Xavier initialization for stable training
+        self.W1 = np.random.randn(input_size, hidden_size) * np.sqrt(2.0 / input_size)
+        self.b1 = np.zeros((1, hidden_size))
+
+        self.W2 = np.random.randn(hidden_size, hidden_size) * np.sqrt(2.0 / hidden_size)
+        self.b2 = np.zeros((1, hidden_size))
+
+        self.W3 = np.random.randn(hidden_size, output_size) * np.sqrt(2.0 / hidden_size)
+        self.b3 = np.zeros((1, output_size))
+
+    def forward(self, x):
+        """Forward pass through the network."""
+        x = np.atleast_2d(x)
+
+        # Layer 1: Linear + ReLU
+        self.z1 = x @ self.W1 + self.b1
+        self.a1 = np.maximum(0, self.z1)  # ReLU
+
+        # Layer 2: Linear + ReLU
+        self.z2 = self.a1 @ self.W2 + self.b2
+        self.a2 = np.maximum(0, self.z2)  # ReLU
+
+        # Layer 3: Linear (Q-values, no activation)
+        self.z3 = self.a2 @ self.W3 + self.b3
+
+        # Cache input for backprop
+        self.input = x
+        return self.z3
+
+    def backward(self, x, target):
+        """
+        Backpropagation using mean squared error loss.
+        Computes gradients and updates weights.
+        """
+        x = np.atleast_2d(x)
+        target = np.atleast_2d(target)
+        batch_size = x.shape[0]
+
+        # Forward pass (recompute activations)
+        output = self.forward(x)
+
+        # Loss gradient: d(MSE)/d(output) = 2(output - target) / batch_size
+        d_output = 2.0 * (output - target) / batch_size
+
+        # Gradient for Layer 3
+        dW3 = self.a2.T @ d_output
+        db3 = np.sum(d_output, axis=0, keepdims=True)
+
+        # Backprop through Layer 3
+        d_a2 = d_output @ self.W3.T
+
+        # ReLU gradient for Layer 2
+        d_z2 = d_a2 * (self.z2 > 0).astype(float)
+
+        # Gradient for Layer 2
+        dW2 = self.a1.T @ d_z2
+        db2 = np.sum(d_z2, axis=0, keepdims=True)
+
+        # Backprop through Layer 2
+        d_a1 = d_z2 @ self.W2.T
+
+        # ReLU gradient for Layer 1
+        d_z1 = d_a1 * (self.z1 > 0).astype(float)
+
+        # Gradient for Layer 1
+        dW1 = self.input.T @ d_z1
+        db1 = np.sum(d_z1, axis=0, keepdims=True)
+
+        # Gradient clipping to prevent exploding gradients
+        for grad in [dW1, db1, dW2, db2, dW3, db3]:
+            np.clip(grad, -1.0, 1.0, out=grad)
+
+        # Update weights (gradient descent)
+        self.W1 -= self.lr * dW1
+        self.b1 -= self.lr * db1
+        self.W2 -= self.lr * dW2
+        self.b2 -= self.lr * db2
+        self.W3 -= self.lr * dW3
+        self.b3 -= self.lr * db3
+
+        # Return loss for monitoring
+        loss = np.mean((output - target) ** 2)
+        return loss
+
+    def copy_weights_from(self, other):
+        """Copy weights from another network (for target network updates)."""
+        self.W1 = other.W1.copy()
+        self.b1 = other.b1.copy()
+        self.W2 = other.W2.copy()
+        self.b2 = other.b2.copy()
+        self.W3 = other.W3.copy()
+        self.b3 = other.b3.copy()
+
+    def save(self, path):
+        """Save network weights to file."""
+        os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
+        np.savez(path,
+                 W1=self.W1, b1=self.b1,
+                 W2=self.W2, b2=self.b2,
+                 W3=self.W3, b3=self.b3)
+
+    def load(self, path):
+        """Load network weights from file."""
+        if not path.endswith('.npz'):
+            path += '.npz'
+        data = np.load(path)
+        self.W1 = data['W1']
+        self.b1 = data['b1']
+        self.W2 = data['W2']
+        self.b2 = data['b2']
+        self.W3 = data['W3']
+        self.b3 = data['b3']
+
+
+# ──────────────────────────────────────────────
+#  Experience Replay Buffer
+# ──────────────────────────────────────────────
+
+class ReplayBuffer:
+    """
+    Stores past experiences (state, action, reward, next_state, done)
+    and samples random mini-batches for training.
+
+    This breaks correlation between consecutive decisions and
+    prevents catastrophic forgetting.
+    """
+
+    def __init__(self, capacity=5000):
+        self.capacity = capacity
+        self.buffer = []
+        self.position = 0
+
+    def push(self, state, action, reward, next_state, done):
+        """Store one experience."""
+        experience = (state, action, reward, next_state, done)
+        if len(self.buffer) < self.capacity:
+            self.buffer.append(experience)
+        else:
+            self.buffer[self.position] = experience
+        self.position = (self.position + 1) % self.capacity
+
+    def sample(self, batch_size):
+        """Sample a random mini-batch."""
+        indices = np.random.choice(len(self.buffer), batch_size, replace=False)
+        batch = [self.buffer[i] for i in indices]
+
+        states = np.array([e[0] for e in batch])
+        actions = np.array([e[1] for e in batch])
+        rewards = np.array([e[2] for e in batch])
+        next_states = np.array([e[3] for e in batch])
+        dones = np.array([e[4] for e in batch])
+
+        return states, actions, rewards, next_states, dones
+
+    def __len__(self):
+        return len(self.buffer)
+
+
+# ──────────────────────────────────────────────
+#  DQN Agent
+# ──────────────────────────────────────────────
+
+class DQNAgent:
+    """
+    Deep Q-Network agent with:
+    - Epsilon-greedy exploration (ε: 1.0 → 0.05)
+    - Experience replay (5,000 buffer)
+    - Target network (updated every N episodes)
+    """
+
+    def __init__(self, state_size=9, action_size=3, hidden_size=128,
+                 lr=0.001, gamma=0.99, epsilon_start=1.0, epsilon_end=0.05,
+                 epsilon_decay=0.995, buffer_size=5000, batch_size=32,
+                 target_update_freq=10):
+
+        self.state_size = state_size
+        self.action_size = action_size
+        self.gamma = gamma
+        self.epsilon = epsilon_start
+        self.epsilon_end = epsilon_end
+        self.epsilon_decay = epsilon_decay
+        self.batch_size = batch_size
+        self.target_update_freq = target_update_freq
+
+        # Q-Network (for decisions)
+        self.q_network = NeuralNetwork(state_size, hidden_size, action_size, lr)
+
+        # Target Network (for stable Q-value targets)
+        self.target_network = NeuralNetwork(state_size, hidden_size, action_size, lr)
+        self.target_network.copy_weights_from(self.q_network)
+
+        # Experience Replay
+        self.memory = ReplayBuffer(buffer_size)
+
+        # Training stats
+        self.training_losses = []
+        self.episode_rewards = []
+
+    def act(self, state, training=True):
+        """
+        Choose action using epsilon-greedy policy.
+        - With probability ε: pick random server (explore)
+        - With probability 1-ε: pick server with highest Q-value (exploit)
+        """
+        if training and np.random.random() < self.epsilon:
+            return np.random.randint(0, self.action_size)
+
+        q_values = self.q_network.forward(state)
+        return int(np.argmax(q_values[0]))
+
+    def predict(self, state, deterministic=True):
+        """Predict action (compatible interface for evaluation)."""
+        if deterministic:
+            q_values = self.q_network.forward(state)
+            action = int(np.argmax(q_values[0]))
+        else:
+            action = self.act(state, training=True)
+        return action, None
+
+    def remember(self, state, action, reward, next_state, done):
+        """Store experience in replay buffer."""
+        self.memory.push(state, action, reward, next_state, done)
+
+    def train_step(self):
+        """
+        Sample mini-batch from replay buffer and update Q-network.
+        Uses the Bellman equation:
+            Q_target = reward + γ * max(Q_target_network(next_state))
+        """
+        if len(self.memory) < self.batch_size:
+            return 0.0
+
+        # Sample random mini-batch
+        states, actions, rewards, next_states, dones = self.memory.sample(self.batch_size)
+
+        # Current Q-values from Q-network
+        current_q = self.q_network.forward(states)
+
+        # Next Q-values from TARGET network (stability)
+        next_q = self.target_network.forward(next_states)
+        max_next_q = np.max(next_q, axis=1)
+
+        # Compute target Q-values using Bellman equation
+        target_q = current_q.copy()
+        for i in range(self.batch_size):
+            if dones[i]:
+                target_q[i, actions[i]] = rewards[i]
+            else:
+                target_q[i, actions[i]] = rewards[i] + self.gamma * max_next_q[i]
+
+        # Normalize targets to prevent exploding gradients
+        target_q = np.clip(target_q, -500, 0)
+
+        # Update Q-network via backpropagation
+        loss = self.q_network.backward(states, target_q)
+        self.training_losses.append(loss)
+
+        return loss
+
+    def update_epsilon(self):
+        """Decay exploration rate."""
+        self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
+
+    def update_target_network(self):
+        """Copy Q-network weights to target network."""
+        self.target_network.copy_weights_from(self.q_network)
+
+    def save(self, path="models/dqn_agent"):
+        """Save model weights and config."""
+        os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
+        self.q_network.save(path + "_q")
+        self.target_network.save(path + "_target")
+
+        config = {
+            'state_size': int(self.state_size),
+            'action_size': int(self.action_size),
+            'epsilon': float(self.epsilon),
+            'gamma': float(self.gamma),
+        }
+        with open(path + "_config.json", 'w') as f:
+            json.dump(config, f)
+
+    def load(self, path="models/dqn_agent"):
+        """Load model weights."""
+        self.q_network.load(path + "_q")
+        self.target_network.load(path + "_target")
+
+        config_path = path + "_config.json"
+        if os.path.exists(config_path):
+            with open(config_path) as f:
+                config = json.load(f)
+            self.epsilon = config.get('epsilon', self.epsilon_end)
+
+
+# ──────────────────────────────────────────────
+#  Training & Evaluation Functions
+# ──────────────────────────────────────────────
+
+def train_rl_agent(env, n_episodes=20, max_steps=200, model_path="models/dqn_agent",
+                   progress_callback=None, **kwargs):
+    """
+    Train the DQN agent on the load balancing environment.
+
+    Args:
+        env: LoadBalancerEnv instance
+        n_episodes: Number of training episodes
+        max_steps: Steps per episode
+        model_path: Where to save the trained model
+        progress_callback: Optional function(episode, n_episodes, avg_reward) for progress updates
+
+    Returns:
+        agent: Trained DQNAgent
+        episode_rewards: List of total rewards per episode
+        episode_latencies: List of average latency per episode
+    """
+    state_size = env.observation_space.shape[0]
+    action_size = env.action_space.n
+
+    agent = DQNAgent(
+        state_size=state_size,
+        action_size=action_size,
+        hidden_size=kwargs.get('hidden_size', 128),
+        lr=kwargs.get('lr', 0.001),
+        gamma=kwargs.get('gamma', 0.99),
+        epsilon_start=kwargs.get('epsilon_start', 1.0),
+        epsilon_end=kwargs.get('epsilon_end', 0.05),
+        epsilon_decay=kwargs.get('epsilon_decay', 0.995),
+        buffer_size=kwargs.get('buffer_size', 5000),
+        batch_size=kwargs.get('batch_size', 32),
+        target_update_freq=kwargs.get('target_update_freq', 10),
     )
 
-    # Create callback to track rewards
-    callback = RewardCallback()
+    episode_rewards = []
+    episode_latencies = []
 
-    # Train the model
-    print("Starting training...")
-    model.learn(
-        total_timesteps=total_timesteps,
-        callback=callback,
-        progress_bar=True
-    )
+    print(f"Starting DQN training for {n_episodes} episodes...")
+    print(f"Network: {state_size} → 128 → 128 → {action_size}")
+    print(f"Replay buffer: {agent.memory.capacity}, Batch: {agent.batch_size}")
+    print()
 
-    # Save the model
-    os.makedirs(os.path.dirname(model_path), exist_ok=True)
-    model.save(model_path)
-    print(f"Model saved to {model_path}")
+    for episode in range(n_episodes):
+        state, _ = env.reset()
+        total_reward = 0
+        ep_latencies = []
 
-    return model, callback.rewards
+        for step in range(max_steps):
+            # Choose action (epsilon-greedy)
+            action = agent.act(state, training=True)
 
-def load_rl_agent(model_path="models/rl_load_balancer"):
-    """Load a trained RL agent."""
-    if os.path.exists(model_path + ".zip"):
-        model = PPO.load(model_path)
-        print(f"Model loaded from {model_path}")
-        return model
-    else:
-        raise FileNotFoundError(f"Model not found at {model_path}")
+            # Take action in environment
+            next_state, reward, terminated, truncated, _ = env.step(action)
 
-def evaluate_rl_agent(env, model, n_episodes=10, max_steps=200):
-    """Evaluate the trained RL agent."""
+            # Store experience
+            done = terminated or truncated
+            agent.remember(state, action, reward, next_state, done)
+
+            # Train on mini-batch from replay buffer
+            agent.train_step()
+
+            total_reward += reward
+            ep_latencies.append(-reward)  # reward = -latency
+            state = next_state
+
+            if done:
+                break
+
+        # End of episode
+        episode_rewards.append(total_reward)
+        avg_latency = np.mean(ep_latencies)
+        episode_latencies.append(avg_latency)
+
+        # Decay epsilon
+        agent.update_epsilon()
+
+        # Update target network periodically
+        if (episode + 1) % agent.target_update_freq == 0:
+            agent.update_target_network()
+            print(f"  → Target network updated at episode {episode + 1}")
+
+        # Progress reporting
+        print(f"Episode {episode + 1}/{n_episodes} | "
+              f"Reward: {total_reward:.1f} | "
+              f"Avg Latency: {avg_latency:.1f} ms | "
+              f"Epsilon: {agent.epsilon:.3f}")
+
+        if progress_callback:
+            progress_callback(episode + 1, n_episodes, total_reward)
+
+    # Save trained model
+    agent.save(model_path)
+    print(f"\nModel saved to {model_path}")
+    print(f"Final epsilon: {agent.epsilon:.4f}")
+
+    return agent, episode_rewards, episode_latencies
+
+
+def evaluate_rl_agent(env, agent, n_episodes=10, max_steps=200):
+    """
+    Evaluate the trained DQN agent.
+
+    Returns dict with:
+        avg_reward, avg_latency, avg_utilization, fairness_index,
+        std_latency, std_utilization, per_server_utilization
+    """
     total_rewards = []
     latencies = []
     utilizations = []
     fairness_scores = []
+    all_per_server = []
 
     for episode in range(n_episodes):
-        obs, _ = env.reset()
+        state, _ = env.reset()
         episode_reward = 0
         episode_latencies = []
         episode_utilizations = []
+        episode_per_server = []
 
         for step in range(max_steps):
-            action, _ = model.predict(obs, deterministic=True)
-            next_obs, reward, terminated, truncated, _ = env.step(action)
+            # Use deterministic policy (no exploration)
+            action, _ = agent.predict(state, deterministic=True)
+            next_state, reward, terminated, truncated, _ = env.step(action)
 
             episode_reward += reward
-            latency = -reward  # Convert reward back to latency
-            episode_latencies.append(latency)
+            episode_latencies.append(-reward)
 
-            # Track server utilizations
-            server_cpus = [next_obs[i*3] for i in range(env.n_servers)]
+            # Track per-server CPU utilizations
+            server_cpus = [next_state[i * 3] for i in range(env.n_servers)]
             episode_utilizations.append(np.mean(server_cpus))
+            episode_per_server.append(server_cpus)
 
-            obs = next_obs
-
+            state = next_state
             if terminated or truncated:
                 break
 
@@ -121,69 +478,33 @@ def evaluate_rl_agent(env, model, n_episodes=10, max_steps=200):
         latencies.append(np.mean(episode_latencies))
         utilizations.append(np.mean(episode_utilizations))
 
-        # Calculate Jain's fairness index for server utilizations
-        final_utilizations = [obs[i*3] for i in range(env.n_servers)]
-        if sum(final_utilizations) > 0:
-            fairness = sum(final_utilizations)**2 / (len(final_utilizations) * sum(u**2 for u in final_utilizations))
+        # Jain's Fairness Index on final server utilizations
+        final_utils = [state[i * 3] for i in range(env.n_servers)]
+        if sum(final_utils) > 0:
+            fairness = sum(final_utils) ** 2 / (len(final_utils) * sum(u ** 2 for u in final_utils))
         else:
             fairness = 0
         fairness_scores.append(fairness)
 
+        # Average per-server utilization across the episode
+        per_server_avg = np.mean(episode_per_server, axis=0).tolist()
+        all_per_server.append(per_server_avg)
+
     return {
-        'avg_reward': np.mean(total_rewards),
-        'avg_latency': np.mean(latencies),
-        'avg_utilization': np.mean(utilizations),
-        'fairness_index': np.mean(fairness_scores),
-        'std_latency': np.std(latencies),
-        'std_utilization': np.std(utilizations)
+        'avg_reward': float(np.mean(total_rewards)),
+        'avg_latency': float(np.mean(latencies)),
+        'avg_utilization': float(np.mean(utilizations)),
+        'fairness_index': float(np.mean(fairness_scores)),
+        'std_latency': float(np.std(latencies)),
+        'std_utilization': float(np.std(utilizations)),
+        'per_server_utilization': np.mean(all_per_server, axis=0).tolist(),
+        'p99_latency': float(np.percentile([l for ep in latencies for l in [ep]], 99)),
     }
 
-def plot_learning_curve(rewards, save_path="results/learning_curve.png"):
-    """Plot the learning curve from training rewards."""
-    plt.figure(figsize=(10, 6))
-    episodes = range(1, len(rewards) + 1)
 
-    # Smooth the rewards for better visualization
-    window_size = max(1, len(rewards) // 50)
-    smoothed_rewards = np.convolve(rewards, np.ones(window_size)/window_size, mode='valid')
-
-    plt.plot(episodes[:len(smoothed_rewards)], smoothed_rewards, color='#3498db', linewidth=2, label='Smoothed Rewards')
-    plt.plot(episodes, rewards, color='#bdc3c7', alpha=0.5, linewidth=1, label='Raw Rewards')
-
-    plt.title('RL Agent Learning Curve')
-    plt.xlabel('Training Episode')
-    plt.ylabel('Average Reward per Episode')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.show()
-
-def create_burst_traffic_env(n_servers=3, burst_intensity=2.0):
-    """Create an environment with bursty traffic patterns."""
-    class BurstyLoadBalancerEnv(LoadBalancerEnv):
-        def __init__(self, n_servers=3, burst_intensity=2.0):
-            super().__init__(n_servers)
-            self.burst_intensity = burst_intensity
-            self.burst_timer = 0
-
-        def step(self, action):
-            # Modify request load based on burst pattern
-            base_load = np.random.uniform(0.05, 0.3)
-
-            # Create periodic bursts
-            if 50 <= self.current_step <= 100:  # Burst period
-                load_multiplier = self.burst_intensity
-            else:
-                load_multiplier = 1.0
-
-            request_load = base_load * load_multiplier
-
-            # Temporarily override the request load
-            original_load = np.random.uniform(0.05, 0.3)
-            # This is a simplified way; in practice, we'd modify the step method properly
-
-            return super().step(action)
-
-    return BurstyLoadBalancerEnv(n_servers, burst_intensity)
+def load_rl_agent(model_path="models/dqn_agent", state_size=9, action_size=3):
+    """Load a trained DQN agent from disk."""
+    agent = DQNAgent(state_size=state_size, action_size=action_size)
+    agent.load(model_path)
+    print(f"DQN agent loaded from {model_path}")
+    return agent

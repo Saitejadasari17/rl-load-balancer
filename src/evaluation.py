@@ -1,28 +1,32 @@
+"""
+Evaluation module for Adaptive Load Balancing.
+Compares DQN agent against baseline algorithms with publication-quality plots.
+"""
+
 import os
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
-from stable_baselines3 import PPO
 
 try:
     from .environment import LoadBalancerEnv
     from .baselines import run_baseline_comparison
-    from .agent import evaluate_rl_agent, load_rl_agent
+    from .agent import DQNAgent, evaluate_rl_agent, load_rl_agent
 except ImportError:
-    # For direct execution
     import sys
     sys.path.append(os.path.dirname(os.path.dirname(__file__)))
     from environment import LoadBalancerEnv
     from baselines import run_baseline_comparison
-    from agent import evaluate_rl_agent, load_rl_agent
+    from agent import DQNAgent, evaluate_rl_agent, load_rl_agent
 
 # Set style for plots
 plt.style.use('seaborn-v0_8')
 sns.set_palette("husl")
 
-def run_full_evaluation(model_path="models/rl_load_balancer", n_episodes=20):
-    """Run complete evaluation comparing RL agent with baselines."""
+
+def run_full_evaluation(model_path="models/dqn_agent", n_episodes=20):
+    """Run complete evaluation comparing DQN agent with baselines."""
     print("Starting full evaluation...")
 
     # Create environment
@@ -32,17 +36,19 @@ def run_full_evaluation(model_path="models/rl_load_balancer", n_episodes=20):
     print("Evaluating baseline algorithms...")
     baseline_results = run_baseline_comparison(env, n_episodes)
 
-    # Evaluate RL agent
-    print("Evaluating RL agent...")
+    # Evaluate DQN agent
+    print("Evaluating DQN agent...")
     try:
-        model = load_rl_agent(model_path)
-        rl_results = evaluate_rl_agent(env, model, n_episodes)
-        baseline_results['RL Agent'] = rl_results
-    except FileNotFoundError:
-        print(f"Warning: RL model not found at {model_path}. Skipping RL evaluation.")
+        agent = load_rl_agent(model_path)
+        rl_results = evaluate_rl_agent(env, agent, n_episodes)
+        baseline_results['RL Agent (DQN)'] = rl_results
+    except (FileNotFoundError, Exception) as e:
+        print(f"Warning: DQN model not found at {model_path}: {e}")
+        print("Skipping RL evaluation.")
         rl_results = None
 
     return baseline_results
+
 
 def plot_latency_comparison(results, save_path="results/latency_comparison.png"):
     """Plot average latency comparison."""
@@ -50,7 +56,7 @@ def plot_latency_comparison(results, save_path="results/latency_comparison.png")
     latencies = [results[alg]['avg_latency'] for alg in algorithms]
     errors = [results[alg]['std_latency'] for alg in algorithms]
 
-    colors = ['#e74c3c', '#e67e22', '#f39c12', '#27ae60']
+    colors = ['#e74c3c', '#e67e22', '#f39c12', '#27ae60', '#3498db']
 
     plt.figure(figsize=(10, 6))
     bars = plt.bar(algorithms, latencies, yerr=errors, capsize=5, color=colors[:len(algorithms)])
@@ -64,7 +70,8 @@ def plot_latency_comparison(results, save_path="results/latency_comparison.png")
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.show()
+    plt.close()
+
 
 def plot_utilization_fairness(results, save_path="results/utilization_fairness.png"):
     """Plot server utilization and fairness comparison."""
@@ -74,8 +81,9 @@ def plot_utilization_fairness(results, save_path="results/utilization_fairness.p
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
+    colors = ['#e74c3c', '#e67e22', '#f39c12', '#27ae60', '#3498db']
+
     # Utilization plot
-    colors = ['#e74c3c', '#e67e22', '#f39c12', '#27ae60']
     bars1 = ax1.bar(algorithms, utilizations, color=colors[:len(algorithms)])
     ax1.bar_label(bars1, fmt='%.3f')
     ax1.set_title('Average Server Utilization', fontweight='bold')
@@ -87,7 +95,7 @@ def plot_utilization_fairness(results, save_path="results/utilization_fairness.p
     # Fairness plot
     bars2 = ax2.bar(algorithms, fairness_scores, color=colors[:len(algorithms)])
     ax2.bar_label(bars2, fmt='%.3f')
-    ax2.set_title('Server Utilization Fairness (Jain\'s Index)', fontweight='bold')
+    ax2.set_title("Server Utilization Fairness (Jain's Index)", fontweight='bold')
     ax2.set_ylabel('Fairness Index (0-1)')
     ax2.set_xlabel('Algorithm')
     ax2.tick_params(axis='x', rotation=45)
@@ -97,60 +105,36 @@ def plot_utilization_fairness(results, save_path="results/utilization_fairness.p
     plt.tight_layout()
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
-def plot_bursty_traffic_comparison(model_path="models/rl_load_balancer", save_path="results/bursty_traffic.png"):
-    """Plot performance under bursty traffic."""
-    from .agent import create_burst_traffic_env
 
-    env = create_burst_traffic_env(n_servers=3, burst_intensity=2.0)
+def plot_learning_curve(episode_rewards, episode_latencies=None,
+                        save_path="results/learning_curve.png"):
+    """Plot the DQN learning curve from training."""
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-    # Simulate bursty traffic over time
-    time_steps = 200
-    time_range = range(time_steps)
+    episodes = range(1, len(episode_rewards) + 1)
 
-    # Round Robin simulation
-    rr_latencies = []
-    obs, _ = env.reset()
-    for t in time_range:
-        action = t % env.n_servers  # Round Robin
-        obs, reward, terminated, truncated, _ = env.step(action)
-        rr_latencies.append(-reward)  # Convert reward to latency
-        if terminated or truncated:
-            break
+    # Reward curve
+    axes[0].plot(episodes, episode_rewards, color='#3498db', linewidth=2, marker='o', markersize=4)
+    axes[0].set_title('Training Reward per Episode', fontweight='bold')
+    axes[0].set_xlabel('Episode')
+    axes[0].set_ylabel('Total Reward')
+    axes[0].grid(True, alpha=0.3)
 
-    # RL Agent simulation
-    try:
-        model = load_rl_agent(model_path)
-        rl_latencies = []
-        obs, _ = env.reset()
-        for t in time_range:
-            action, _ = model.predict(obs, deterministic=True)
-            obs, reward, terminated, truncated, _ = env.step(action)
-            rl_latencies.append(-reward)
-            if terminated or truncated:
-                break
-    except FileNotFoundError:
-        print("RL model not found, using baseline for RL")
-        rl_latencies = rr_latencies  # Placeholder
+    # Latency curve
+    if episode_latencies:
+        axes[1].plot(episodes, episode_latencies, color='#e74c3c', linewidth=2, marker='o', markersize=4)
+        axes[1].set_title('Average Latency per Episode', fontweight='bold')
+        axes[1].set_xlabel('Episode')
+        axes[1].set_ylabel('Average Latency (ms)')
+        axes[1].grid(True, alpha=0.3)
 
-    # Plot
-    plt.figure(figsize=(12, 6))
-    plt.plot(time_range[:len(rr_latencies)], rr_latencies, label='Round Robin', color='#e74c3c', linewidth=2)
-    plt.plot(time_range[:len(rl_latencies)], rl_latencies, label='RL Agent', color='#27ae60', linewidth=2)
-
-    # Highlight burst period
-    plt.axvspan(50, 100, alpha=0.1, color='red', label='Traffic Burst Period')
-
-    plt.title('Latency Under Bursty Traffic Patterns', fontsize=14, fontweight='bold')
-    plt.xlabel('Time Step', fontsize=12)
-    plt.ylabel('Response Time (ms)', fontsize=12)
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-
+    plt.tight_layout()
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.show()
+    plt.close()
+
 
 def generate_summary_report(results, save_path="results/summary_report.txt"):
     """Generate a text summary of results."""
@@ -158,7 +142,8 @@ def generate_summary_report(results, save_path="results/summary_report.txt"):
 
     with open(save_path, 'w') as f:
         f.write("ADAPTIVE LOAD BALANCING EVALUATION REPORT\n")
-        f.write("=" * 50 + "\n\n")
+        f.write("=" * 50 + "\n")
+        f.write("Agent: Deep Q-Network (DQN) — NumPy implementation\n\n")
 
         f.write("ALGORITHMS COMPARED:\n")
         for alg in results.keys():
@@ -167,9 +152,8 @@ def generate_summary_report(results, save_path="results/summary_report.txt"):
 
         f.write("PERFORMANCE METRICS:\n\n")
 
-        # Create table
         header = "| Algorithm | Avg Latency (ms) | Std Dev | Avg Utilization | Fairness Index |\n"
-        separator = "|-----------|------------------|---------|-----------------|---------------|\n"
+        separator = "|-----------|------------------|---------|-----------------|----------------|\n"
         f.write(header)
         f.write(separator)
 
@@ -178,7 +162,11 @@ def generate_summary_report(results, save_path="results/summary_report.txt"):
             std_lat = metrics['std_latency']
             util = metrics['avg_utilization']
             fairness = metrics.get('fairness_index', 'N/A')
-            f.write(f"| {alg:<10} | {latency:>15.2f} | {std_lat:>7.2f} | {util:>15.3f} | {fairness:>13} |\n")
+            if isinstance(fairness, float):
+                fairness_str = f"{fairness:.3f}"
+            else:
+                fairness_str = str(fairness)
+            f.write(f"| {alg:<10} | {latency:>15.2f} | {std_lat:>7.2f} | {util:>15.3f} | {fairness_str:>14} |\n")
 
         f.write("\n")
 
@@ -190,25 +178,23 @@ def generate_summary_report(results, save_path="results/summary_report.txt"):
         f.write(f"- Best latency: {best_latency[0]} ({best_latency[1]['avg_latency']:.2f} ms)\n")
         f.write(f"- Best fairness: {best_fairness[0]} (Jain's Index: {best_fairness[1].get('fairness_index', 'N/A')})\n")
 
-        if 'RL Agent' in results:
-            rl_latency = results['RL Agent']['avg_latency']
+        if 'RL Agent (DQN)' in results:
+            rl_latency = results['RL Agent (DQN)']['avg_latency']
             rr_latency = results.get('Round Robin', {}).get('avg_latency', rl_latency)
             if rr_latency > rl_latency:
                 improvement = ((rr_latency - rl_latency) / rr_latency) * 100
-                f.write(f"- RL improvement over Round Robin: {improvement:.1f}%\n")
+                f.write(f"- DQN improvement over Round Robin: {improvement:.1f}%\n")
 
     print(f"Summary report saved to {save_path}")
+
 
 def run_all_evaluations():
     """Run all evaluations and generate plots."""
     results = run_full_evaluation()
 
-    # Generate plots
     plot_latency_comparison(results)
     plot_utilization_fairness(results)
-    plot_bursty_traffic_comparison()
 
-    # Generate report
     generate_summary_report(results)
 
     print("All evaluations completed!")

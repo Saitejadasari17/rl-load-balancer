@@ -3,223 +3,255 @@ Azure Serverless Functions Dataset Integration
 Loads and processes the Microsoft Azure Functions Invocation dataset (July 2019)
 for realistic load balancing simulation.
 
-Supports: .csv files and .tar.xz compressed archives
+Supports loading multiple CSV files from the extracted dataset folder:
+  - invocations_per_function_md.anon.d01.csv through d14.csv
+  - function_durations_percentiles.anon.d01.csv through d14.csv
+  - app_memory_percentiles.anon.d01.csv through d12.csv
 
 Dataset: https://github.com/Azure/AzurePublicDataset
-Paper: "Serverless in the Wild: Characterizing and Optimizing the Serverless Paradigm"
+Paper: "Serverless in the Wild" (ATC 2020)
 """
 
 import numpy as np
 import pandas as pd
 import os
 from pathlib import Path
+from glob import glob
 
-try:
-    from .extract_compressed import CompressedDatasetHandler
-except ImportError:
-    from extract_compressed import CompressedDatasetHandler
 
 class AzureDatasetLoader:
-    """Load and process Azure Functions dataset traces."""
+    """Load and process Azure Functions dataset traces from multiple CSV files."""
 
-    def __init__(self, data_path=None):
+    def __init__(self, data_dir=None):
         """
         Initialize dataset loader.
-        
+
         Args:
-            data_path: Path to Azure dataset CSV file. If None, will look for it in data/ folder.
+            data_dir: Path to folder containing extracted Azure CSV files.
+                      Defaults to 'data/extracted'.
         """
-        self.data_path = data_path
-        self.traces = None
-        self.invocations = None
+        self.data_dir = data_dir or "data/extracted"
+        self.invocation_data = None
+        self.duration_data = None
+        self.traffic_pattern = None
 
-    def download_dataset(self, output_dir="data"):
+    def load_invocation_traces(self, day=1):
         """
-        Download the Azure Functions dataset.
-        Note: Manual download from GitHub may be required.
-        """
-        print("Azure dataset download instructions:")
-        print("1. Download from: https://github.com/Azure/AzurePublicDataset")
-        print("2. Look for 'azurefunctions_trace' files")
-        print("3. Place CSV files in the 'data/' directory")
-        print("4. Recommended: Use invocations_per_function_md5_90min.csv")
+        Load invocation data for a specific day.
 
-    def load_traces(self, csv_file=None):
-        """
-        Load Azure Functions invocation traces.
-        
-        Supports:
-        - .csv files directly
-        - .tar.xz compressed archives (auto-extracts)
-        
-        Expected columns (or compatible format):
-        - timestamp: Unix timestamp
-        - function_name / function_id: Function identifier
-        - execution_time: Duration of function execution (ms)
-        - memory_used: Memory consumption (MB)
-        - trigger_type: HTTP, Timer, Queue, etc.
-        """
-        if csv_file is None:
-            csv_file = self.data_path or self._find_dataset_file()
+        The invocation CSV format:
+            HashOwner, HashApp, HashFunction, Trigger,
+            1, 2, 3, ..., 1440  (per-minute invocation counts)
 
-        if csv_file is None or not os.path.exists(csv_file):
-            print(f"Dataset not found at {csv_file}")
-            print("Using synthetic data instead. To use real data:")
-            print("  1. Download dataset from https://github.com/Azure/AzurePublicDataset")
-            print("  2. Place it in data/ folder (.csv or .tar.xz format)")
+        Args:
+            day: Day number (1-14)
+
+        Returns:
+            numpy array of per-minute total invocations
+        """
+        filename = f"invocations_per_function_md.anon.d{day:02d}.csv"
+        filepath = os.path.join(self.data_dir, filename)
+
+        if not os.path.exists(filepath):
+            print(f"Invocation file not found: {filepath}")
             return None
 
-        print(f"Loading dataset from {csv_file}")
+        print(f"Loading invocations for Day {day}: {filename}")
+        print(f"  File size: {os.path.getsize(filepath) / 1024 / 1024:.1f} MB")
 
-        # Handle .tar.xz compressed files
-        if csv_file.endswith('.tar.xz'):
-            print("Detected .tar.xz format - extracting...")
-            handler = CompressedDatasetHandler(csv_file)
-            handler.extract(output_dir="data/extracted")
-            df = handler.load_first_csv()
-        elif csv_file.endswith('.csv'):
-            # Load CSV directly
-            try:
-                df = pd.read_csv(csv_file)
-                print(f"Loaded {len(df)} invocation records")
-            except Exception as e:
-                print(f"Error loading dataset: {e}")
-                return None
-        else:
-            print(f"Unsupported file format: {csv_file}")
+        # Read CSV — first 4 columns are metadata, rest are minute-by-minute counts
+        df = pd.read_csv(filepath)
+        print(f"  Functions loaded: {len(df):,}")
+
+        # Columns 4 onwards are the 1440 minute-by-minute invocation counts
+        # Column names are '1', '2', ..., '1440' (string numbers)
+        minute_cols = [col for col in df.columns if col.isdigit()]
+
+        if not minute_cols:
+            # Try numeric column detection as fallback
+            minute_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+
+        print(f"  Time columns: {len(minute_cols)} minutes")
+
+        # Sum invocations across ALL functions for each minute
+        # This gives total traffic per minute across the entire platform
+        per_minute_traffic = df[minute_cols].sum(axis=0).values.astype(float)
+
+        print(f"  Total invocations: {per_minute_traffic.sum():,.0f}")
+        print(f"  Peak minute: {per_minute_traffic.max():,.0f} invocations")
+        print(f"  Avg per minute: {per_minute_traffic.mean():,.0f} invocations")
+
+        self.invocation_data = per_minute_traffic
+        return per_minute_traffic
+
+    def load_duration_data(self, day=1):
+        """
+        Load function duration percentiles for a specific day.
+
+        CSV format: HashOwner, HashApp, HashFunction, Average, Count,
+                    Minimum, Maximum, percentile_Average_0, ..., percentile_Average_100
+
+        Returns:
+            DataFrame with duration statistics
+        """
+        filename = f"function_durations_percentiles.anon.d{day:02d}.csv"
+        filepath = os.path.join(self.data_dir, filename)
+
+        if not os.path.exists(filepath):
+            print(f"Duration file not found: {filepath}")
             return None
 
-        self.traces = df
+        print(f"Loading durations for Day {day}: {filename}")
+        df = pd.read_csv(filepath)
+        print(f"  Functions with duration data: {len(df):,}")
+
+        self.duration_data = df
         return df
 
-    def _find_dataset_file(self):
-        """Search for dataset files in common locations."""
-        search_patterns = [
-            "data/*.tar.xz",          # .tar.xz files first (larger archives)
-            "data/invocations_per_function_md5_90min.csv",
-            "data/azure_functions.csv",
-            "data/*.csv",             # Any CSV
-            "../data/*.tar.xz",
-            "../data/invocations_per_function_md5_90min.csv",
-        ]
-        
-        from glob import glob
-        
-        for pattern in search_patterns:
-            files = glob(pattern)
-            if files:
-                return files[0]  # Return first match
-        return None
-
-    def get_traffic_pattern(self, duration_seconds=3600, n_servers=3):
+    def get_traffic_pattern(self, day=1, n_servers=3):
         """
-        Convert Azure dataset into server load pattern.
-        
+        Convert Azure invocation data into a normalized load pattern
+        suitable for the RL environment.
+
         Args:
-            duration_seconds: Simulation duration (default 1 hour)
-            n_servers: Number of servers to distribute load across
-            
+            day: Which day to load (1-14)
+            n_servers: Number of servers (for context)
+
         Returns:
-            List of request loads for each time step
+            numpy array of normalized load values [0.05, 0.3] per minute
         """
-        if self.traces is None:
-            traces = self.load_traces()
-            if traces is None:
-                return self._generate_synthetic_pattern(duration_seconds, n_servers)
-
-        # Extract execution times (proxy for request size/load)
-        if 'execution_time' in self.traces.columns:
-            exec_times = self.traces['execution_time'].values
-        elif 'duration' in self.traces.columns:
-            exec_times = self.traces['duration'].values
+        if self.invocation_data is None:
+            data = self.load_invocation_traces(day)
+            if data is None:
+                print("Falling back to synthetic traffic pattern")
+                return self._generate_synthetic_pattern(1440, n_servers)
         else:
-            # Use any numeric column as proxy
-            numeric_cols = self.traces.select_dtypes(include=[np.number]).columns
-            if len(numeric_cols) > 0:
-                exec_times = self.traces[numeric_cols[0]].values
-            else:
-                return self._generate_synthetic_pattern(duration_seconds, n_servers)
+            data = self.invocation_data
 
-        # Normalize execution times to [0.05, 0.3] range (request load)
-        exec_times = np.array(exec_times, dtype=float)
-        exec_times = np.clip(exec_times, 0, np.percentile(exec_times, 99))  # Remove outliers
-        normalized = 0.05 + (exec_times / np.max(exec_times)) * 0.25
+        # Normalize invocation counts to [0.05, 0.3] load range
+        data_min = data.min()
+        data_max = data.max()
 
-        # Create time series by resampling
-        n_steps = min(len(normalized), duration_seconds)
-        traffic_pattern = normalized[:n_steps]
+        if data_max - data_min < 1e-6:
+            # All values are the same — use flat load
+            normalized = np.full_like(data, 0.15)
+        else:
+            normalized = 0.05 + (data - data_min) / (data_max - data_min) * 0.25
 
-        # If we need more steps, repeat pattern
-        if len(traffic_pattern) < duration_seconds:
-            repeats = duration_seconds // len(traffic_pattern) + 1
-            traffic_pattern = np.tile(traffic_pattern, repeats)[:duration_seconds]
+        self.traffic_pattern = normalized
+        return normalized
 
-        return traffic_pattern.tolist()
+    def get_execution_time_distribution(self, day=1):
+        """
+        Get execution time distribution from duration data.
+        Used to create heterogeneous request loads.
 
-    def _generate_synthetic_pattern(self, duration_seconds, n_servers):
+        Returns:
+            numpy array of average execution times (ms), normalized
+        """
+        if self.duration_data is None:
+            df = self.load_duration_data(day)
+            if df is None:
+                return None
+        else:
+            df = self.duration_data
+
+        if 'Average' not in df.columns:
+            return None
+
+        exec_times = df['Average'].dropna().values.astype(float)
+        # Remove outliers (above 99th percentile)
+        p99 = np.percentile(exec_times, 99)
+        exec_times = np.clip(exec_times, 0, p99)
+
+        # Normalize to [0.05, 0.3]
+        if exec_times.max() > 0:
+            normalized = 0.05 + (exec_times / exec_times.max()) * 0.25
+        else:
+            normalized = np.full_like(exec_times, 0.15)
+
+        return normalized
+
+    def _generate_synthetic_pattern(self, duration_minutes, n_servers):
         """Generate synthetic traffic pattern when dataset unavailable."""
-        # Realistic pattern: normal traffic with periodic bursts
         pattern = []
-        for t in range(duration_seconds):
+        for t in range(duration_minutes):
             base_load = np.random.uniform(0.05, 0.15)
 
-            # Periodic burst (like business hours or scheduled jobs)
-            hour_of_day = (t // 3600) % 24
-            if 9 <= hour_of_day <= 17:  # Business hours
+            # Simulate diurnal pattern (24-hour cycle over 1440 minutes)
+            hour = (t / 60) % 24
+            if 9 <= hour <= 17:  # Business hours
                 burst_factor = 1.5
             else:
                 burst_factor = 1.0
 
-            # Random spike (cloud events, viral content)
-            if np.random.random() < 0.01:  # 1% chance per second
+            # Random spike (1% chance per minute)
+            if np.random.random() < 0.01:
                 burst_factor *= 2.0
 
-            load = base_load * burst_factor
-            pattern.append(np.clip(load, 0.05, 0.3))
+            load = np.clip(base_load * burst_factor, 0.05, 0.3)
+            pattern.append(load)
 
-        return pattern
+        return np.array(pattern)
 
-    def get_statistics(self):
-        """Print dataset statistics."""
-        if self.traces is None:
-            self.load_traces()
+    def get_statistics(self, day=1):
+        """Print comprehensive dataset statistics."""
+        print("\n" + "=" * 60)
+        print(f"  AZURE FUNCTIONS DATASET — DAY {day}")
+        print("=" * 60)
 
-        if self.traces is None:
-            print("No dataset loaded")
-            return
+        # Load data if needed
+        traffic = self.get_traffic_pattern(day)
+        durations = self.load_duration_data(day)
 
-        print("\n=== Azure Dataset Statistics ===")
-        print(f"Total invocations: {len(self.traces)}")
+        if self.invocation_data is not None:
+            data = self.invocation_data
+            print(f"\n📊 Invocations (per-minute aggregated):")
+            print(f"   Total invocations:  {data.sum():>15,.0f}")
+            print(f"   Peak minute:        {data.max():>15,.0f}")
+            print(f"   Min minute:         {data.min():>15,.0f}")
+            print(f"   Mean per minute:    {data.mean():>15,.0f}")
+            print(f"   Std deviation:      {data.std():>15,.0f}")
+            print(f"   Duration:           {len(data):>15,} minutes ({len(data)/60:.1f} hours)")
 
-        if 'execution_time' in self.traces.columns:
-            exec_times = self.traces['execution_time']
-            print(f"Execution time (ms): mean={exec_times.mean():.2f}, "
-                  f"median={exec_times.median():.2f}, "
-                  f"p99={exec_times.quantile(0.99):.2f}")
-
-        if 'memory_used' in self.traces.columns:
-            memory = self.traces['memory_used']
-            print(f"Memory used (MB): mean={memory.mean():.2f}, "
-                  f"median={memory.median():.2f}, "
-                  f"p99={memory.quantile(0.99):.2f}")
-
-        if 'trigger_type' in self.traces.columns:
-            print(f"Trigger types: {self.traces['trigger_type'].value_counts().to_dict()}")
+        if durations is not None and 'Average' in durations.columns:
+            avg_dur = durations['Average'].dropna()
+            print(f"\n⏱️  Execution Durations (ms):")
+            print(f"   Mean:               {avg_dur.mean():>15.1f} ms")
+            print(f"   Median:             {avg_dur.median():>15.1f} ms")
+            print(f"   P99:                {avg_dur.quantile(0.99):>15.1f} ms")
+            print(f"   Max:                {avg_dur.max():>15.1f} ms")
 
         print()
+
+    def list_available_files(self):
+        """List all available dataset files in the data directory."""
+        if not os.path.exists(self.data_dir):
+            print(f"Data directory not found: {self.data_dir}")
+            return {}
+
+        files = {
+            'invocations': sorted(glob(os.path.join(self.data_dir, "invocations_per_function_md.anon.d*.csv"))),
+            'durations': sorted(glob(os.path.join(self.data_dir, "function_durations_percentiles.anon.d*.csv"))),
+            'memory': sorted(glob(os.path.join(self.data_dir, "app_memory_percentiles.anon.d*.csv"))),
+        }
+
+        print(f"\n📁 Available files in {self.data_dir}:")
+        for category, file_list in files.items():
+            print(f"   {category}: {len(file_list)} files")
+            for f in file_list[:3]:
+                size_mb = os.path.getsize(f) / 1024 / 1024
+                print(f"     - {os.path.basename(f)} ({size_mb:.1f} MB)")
+            if len(file_list) > 3:
+                print(f"     ... and {len(file_list) - 3} more")
+
+        return files
 
 
 class TraceReplayEnvironment:
     """Environment that replays real Azure traces instead of synthetic data."""
 
     def __init__(self, traces, n_servers=3):
-        """
-        Initialize trace replay.
-        
-        Args:
-            traces: List of request loads from real dataset
-            n_servers: Number of servers
-        """
         self.traces = traces
         self.n_servers = n_servers
         self.current_step = 0
@@ -227,8 +259,7 @@ class TraceReplayEnvironment:
     def get_request_load(self):
         """Get next request load from traces."""
         if self.current_step >= len(self.traces):
-            self.current_step = 0  # Loop back to start
-
+            self.current_step = 0
         load = self.traces[self.current_step]
         self.current_step += 1
         return load
@@ -238,18 +269,22 @@ class TraceReplayEnvironment:
         self.current_step = 0
 
 
-def compare_with_azure_data():
-    """Utility function to compare algorithms on real Azure data."""
-    loader = AzureDatasetLoader()
-    traffic = loader.get_traffic_pattern(duration_seconds=1000, n_servers=3)
-    loader.get_statistics()
-    return traffic
+def load_azure_traffic(data_dir="data/extracted", day=1):
+    """
+    Convenience function to load Azure traffic for a specific day.
+
+    Returns:
+        numpy array of normalized load values, or None if not available
+    """
+    loader = AzureDatasetLoader(data_dir)
+    return loader.get_traffic_pattern(day=day)
 
 
 if __name__ == "__main__":
-    # Example usage
     loader = AzureDatasetLoader()
-    loader.get_statistics()
-    traffic = loader.get_traffic_pattern()
-    print(f"Generated traffic pattern with {len(traffic)} steps")
-    print(f"Sample loads: {traffic[:10]}")
+    loader.list_available_files()
+    loader.get_statistics(day=1)
+    traffic = loader.get_traffic_pattern(day=1)
+    if traffic is not None:
+        print(f"Traffic pattern: {len(traffic)} steps")
+        print(f"Sample loads: {traffic[:10]}")

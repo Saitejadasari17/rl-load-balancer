@@ -22,7 +22,7 @@ export default function App() {
         try {
           const res = await fetch(`${apiUrl}/training-status`);
           const data = await res.json();
-          
+
           if (data.status === 'completed') {
             setTrainingStatus('completed');
             fetchResults();
@@ -53,9 +53,9 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(trainConfig)
       });
-      
+
       if (!res.ok) throw new Error('Training failed');
-      
+
       const data = await res.json();
       setResults(data);
       setTrainingStatus('completed');
@@ -74,13 +74,13 @@ export default function App() {
             <Zap className="w-8 h-8 text-blue-500" />
             <h1 className="text-3xl font-bold">RL Load Balancer</h1>
           </div>
-          <p className="text-slate-400">Adaptive load balancing using Deep Reinforcement Learning</p>
+          <p className="text-slate-400">Adaptive load balancing using reinforcement learning </p>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
-        
+
         {/* Upload & Config Section */}
         <section className="grid md:grid-cols-3 gap-6">
           <div className="md:col-span-2">
@@ -94,19 +94,19 @@ export default function App() {
             <div className="space-y-4">
               <div>
                 <label className="text-sm text-slate-400">Timesteps</label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   value={trainConfig.timesteps}
-                  onChange={e => setTrainConfig({...trainConfig, timesteps: parseInt(e.target.value)})}
+                  onChange={e => setTrainConfig({ ...trainConfig, timesteps: parseInt(e.target.value) })}
                   className="w-full mt-1 bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white"
                 />
               </div>
               <div>
                 <label className="text-sm text-slate-400">Episodes</label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   value={trainConfig.episodes}
-                  onChange={e => setTrainConfig({...trainConfig, episodes: parseInt(e.target.value)})}
+                  onChange={e => setTrainConfig({ ...trainConfig, episodes: parseInt(e.target.value) })}
                   className="w-full mt-1 bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white"
                 />
               </div>

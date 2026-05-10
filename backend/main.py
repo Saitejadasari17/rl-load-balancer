@@ -72,8 +72,8 @@ training_state = {
 
 # Request models
 class TrainingConfig(BaseModel):
-    timesteps: int = 50000
-    episodes: int = 10
+    timesteps: int = 100  # 100 episodes of training (was ignoring this parameter)
+    episodes: int = 20    # 20 episodes for final evaluation (was 10)
     servers: int = 3
 
 # ============ API ENDPOINTS ============
@@ -160,12 +160,13 @@ async def start_training(config: TrainingConfig):
         
         # Train RL
         training_state["progress"] = 50
-        training_state["message"] = f"Training RL for {config.timesteps:,} steps..."
+        training_state["message"] = f"Training RL for {config.timesteps} episodes..."
         
         os.makedirs('models', exist_ok=True)
-        model, training_rewards = train_rl_agent(
+        model, training_rewards, episode_latencies = train_rl_agent(
             env=env,
-            total_timesteps=config.timesteps,
+            n_episodes=config.timesteps,  # Fixed: was total_timesteps (wrong parameter name)
+            max_steps=200,
             model_path='models/rl_agent_demo'
         )
         

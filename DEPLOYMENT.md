@@ -6,7 +6,7 @@
 - [ ] Vercel account created (free)
 - [ ] Render account created (free)
 - [ ] Backend runs locally: `cd backend && python -m uvicorn main:app --reload`
-- [ ] Frontend runs locally: `cd frontend && npm start`
+- [ ] Frontend runs locally: `cd frontend && npm run dev`
 
 ---
 
@@ -25,9 +25,9 @@ python -m uvicorn main:app --reload
 ```bash
 cd frontend
 npm install
-npm start
-# Opens at http://localhost:3000
-# Set REACT_APP_API_URL=http://localhost:8000 in .env
+npm run dev
+# Opens at http://localhost:5173
+# Set REACT_APP_API_URL=http://localhost:8000 in .env.local
 ```
 
 ---
