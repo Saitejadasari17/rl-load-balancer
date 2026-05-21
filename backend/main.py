@@ -1,24 +1,13 @@
-"""
-FastAPI Backend for Adaptive Load Balancing RL System
-Simplified for reliable deployment on Render
-"""
-
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import os
 import sys
 import numpy as np
 import pandas as pd
-from pathlib import Path
 import json
-import traceback
-from typing import Optional
 
-# Make imports more robust
 try:
-    # Try relative imports first (when running as module)
     from ..src.environment import LoadBalancerEnv
     from ..src.baselines import (
         RoundRobinAgent, LeastConnectionsAgent, RandomAgent,
@@ -26,33 +15,14 @@ try:
     )
     from ..src.agent import train_rl_agent, evaluate_rl_agent
 except ImportError:
-    # Fallback for direct execution
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../src'))
-    
-    try:
-        from src.environment import LoadBalancerEnv
-        from src.baselines import (
-            RoundRobinAgent, LeastConnectionsAgent, RandomAgent,
-            WeightedRoundRobinAgent, evaluate_agent
-        )
-        from src.agent import train_rl_agent, evaluate_rl_agent
-    except Exception as e:
-        print(f"⚠️ Warning: RL modules not found. Using stub mode. Error: {e}")
-        # Create stub classes for missing modules
-        class LoadBalancerEnv:
-            def __init__(self, *args, **kwargs):
-                self.n_servers = kwargs.get('n_servers', 3)
-        
-        class RoundRobinAgent:
-            pass
-
-# Initialize FastAPI
-app = FastAPI(
-    title="Adaptive Load Balancing - RL System",
-    description="Train RL agents for load balancing",
-    version="1.0.0"
-)
+    sys.path.insert(0, os.path.dirname(__file__) + '/..')
+    from src.environment import LoadBalancerEnv
+    from src.baselines import (
+        RoundRobinAgent, LeastConnectionsAgent, RandomAgent,
+        WeightedRoundRobinAgent, evaluate_agent
+    )
+    from src.agent import train_rl_agent, evaluate_rl_agent
+app = FastAPI(title="Adaptive Load Balancing - RL System", version="1.0.0")
 
 # CORS configuration
 app.add_middleware(
@@ -70,38 +40,25 @@ training_state = {
     "message": "Ready for training"
 }
 
-# Request models
 class TrainingConfig(BaseModel):
-    timesteps: int = 100  # 100 episodes of training (was ignoring this parameter)
-    episodes: int = 20    # 20 episodes for final evaluation (was 10)
+    timesteps: int = 100
+    episodes: int = 20
     servers: int = 3
-
-# ============ API ENDPOINTS ============
 
 @app.get("/")
 async def root():
-    """Health check"""
     return {
         "status": "online",
         "service": "RL Load Balancer API",
-        "version": "1.0.0",
-        "timestamp": str(pd.Timestamp.now())
+        "version": "1.0.0"
     }
 
 @app.get("/health")
 async def health():
-    """Detailed health check"""
-    return {
-        "status": "healthy",
-        "python": sys.version,
-        "working_directory": os.getcwd(),
-        "has_gym": True,
-        "has_stable_baselines": True
-    }
+    return {"status": "healthy"}
 
 @app.get("/training-status")
 async def get_status():
-    """Get training status"""
     return training_state
 
 @app.post("/upload-dataset")

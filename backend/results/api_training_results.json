@@ -2,32 +2,32 @@
   "status": "completed",
   "baselines": {
     "Round Robin": {
-      "avg_latency": 185.7039060526934,
-      "avg_utilization": 0.925205647945404,
-      "std_latency": 8.458214556158211
+      "avg_latency": 186.60974241838898,
+      "avg_utilization": 0.9275139570236206,
+      "std_latency": 19.091685392767758
     },
     "Least Connections": {
-      "avg_latency": 171.19608737716987,
-      "avg_utilization": 0.9188413619995117,
-      "std_latency": 0.7955685973056603
+      "avg_latency": 171.1188954902085,
+      "avg_utilization": 0.9261139631271362,
+      "std_latency": 9.853710684085783
     },
     "Random": {
-      "avg_latency": 209.61810245540624,
-      "avg_utilization": 0.8991677165031433,
-      "std_latency": 15.600603624963085
+      "avg_latency": 229.80768880871454,
+      "avg_utilization": 0.9077271223068237,
+      "std_latency": 8.279525634787149
     },
     "Weighted RR": {
-      "avg_latency": 511.745271023339,
-      "avg_utilization": 0.6354384422302246,
-      "std_latency": 11.947565942275588
+      "avg_latency": 503.1496386804829,
+      "avg_utilization": 0.636303186416626,
+      "std_latency": 10.408885588629687
     }
   },
   "rl_agent": {
-    "avg_latency": 175.8667361385431,
-    "avg_utilization": 0.9189621210098267,
-    "fairness_index": 0.9993577446902222
+    "avg_latency": 476.59409378913244,
+    "avg_utilization": 0.6292892694473267,
+    "fairness_index": 0.6665417469882335
   },
-  "best_baseline_ms": 171.19608737716987,
-  "rl_agent_ms": 175.8667361385431,
-  "improvement": -2.7282450393174646
+  "best_baseline_ms": 171.1188954902085,
+  "rl_agent_ms": 476.59409378913244,
+  "improvement": -178.51634527199445
 }

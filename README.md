@@ -1,33 +1,14 @@
 # Adaptive Load Balancing Using Reinforcement Learning
 
-A capstone project implementing an intelligent load balancer that uses Deep Reinforcement Learning (RL) to optimize request routing in distributed systems.
+A capstone project implementing an intelligent load balancer using Deep Reinforcement Learning to optimize request routing in distributed systems.
 
-## Problem Statement
+## Features
 
-Traditional load balancing algorithms (Round Robin, Least Connections, etc.) use static, rule-based approaches that fail to adapt to dynamic traffic patterns and server heterogeneity. This project demonstrates how Reinforcement Learning can create an adaptive load balancer that learns optimal routing decisions through experience.
-
-## Key Features
-
-- **Custom Simulation Environment**: Discrete-event simulation of a distributed server cluster
-- **Reinforcement Learning Agent**: PPO-based agent that learns routing policies
-- **Baseline Comparisons**: Implementation of Round Robin, Least Connections, Random, and Weighted Round Robin
-- **Comprehensive Evaluation**: Metrics including latency, throughput, fairness, and performance under bursty traffic
-- **Visualization**: Learning curves, performance comparisons, and traffic pattern analysis
-
-## Architecture
-
-```
-Incoming Requests
-       ↓
-[RL Load Balancer]
-       ↓ observes
-┌─────────────────────┐
-│ Server States:      │
-│ - CPU Utilization   │
-│ - Queue Length      │
-│ - Response Time     │
-└─────────────────────┘
-       ↓ decides
+- Custom Simulation Environment: Distributed server cluster simulation
+- RL Agent: Learns optimal routing policies  
+- Baselines: Round Robin, Least Connections, Random, Weighted Round Robin
+- Evaluation: Latency, throughput, fairness metrics
+- Visualization: Performance comparisons and learning curves
    Route to Server X
        ↓ gets reward
    Response Time → Reward

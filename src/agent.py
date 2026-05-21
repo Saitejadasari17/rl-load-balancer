@@ -1,17 +1,5 @@
 """
-Deep Q-Network (DQN) Agent for Adaptive Load Balancing
-Built from scratch using only NumPy — no PyTorch, no TensorFlow.
-
-This demonstrates understanding of:
-- Forward propagation through a neural network
-- Backpropagation and gradient descent
-- Experience replay buffer
-- Target network for training stability
-- Epsilon-greedy exploration strategy
-
-Architecture: 9 → 128 → 128 → 3
-  Input:  [cpu1, queue1, lat1, cpu2, queue2, lat2, cpu3, queue3, lat3]
-  Output: [Q(s, Server1), Q(s, Server2), Q(s, Server3)]
+Deep Q-Network Agent for Adaptive Load Balancing
 """
 
 import os
@@ -25,28 +13,13 @@ except ImportError:
     sys.path.append(os.path.dirname(os.path.dirname(__file__)))
     from environment import LoadBalancerEnv
 
-
-# ──────────────────────────────────────────────
-#  Neural Network (NumPy only)
-# ──────────────────────────────────────────────
-
 class NeuralNetwork:
-    """
-    Fully-connected neural network using only NumPy.
-    Architecture: input_size → hidden1 → hidden2 → output_size
-    Activation: ReLU (hidden), Linear (output)
-    """
-
     def __init__(self, input_size, hidden_size, output_size, lr=0.001):
         self.lr = lr
-
-        # Xavier initialization for stable training
         self.W1 = np.random.randn(input_size, hidden_size) * np.sqrt(2.0 / input_size)
         self.b1 = np.zeros((1, hidden_size))
-
         self.W2 = np.random.randn(hidden_size, hidden_size) * np.sqrt(2.0 / hidden_size)
         self.b2 = np.zeros((1, hidden_size))
-
         self.W3 = np.random.randn(hidden_size, output_size) * np.sqrt(2.0 / hidden_size)
         self.b3 = np.zeros((1, output_size))
 
