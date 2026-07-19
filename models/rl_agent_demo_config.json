@@ -1,0 +1,9 @@
+{
+  "state_size": 9,
+  "action_size": 3,
+  "epsilon": 0.09999999999999998,
+  "gamma": 0.99,
+  "train_steps_done": 5001,
+  "device": "cpu",
+  "architecture": "Dueling Double DQN + PER"
+}
